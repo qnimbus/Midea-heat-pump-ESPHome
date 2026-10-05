@@ -5,6 +5,86 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [10.0.0] - 2026-08-30
+
+### Changed
+
+- Renamed entities with a known function from "Function Setting $something" to "$something":
+  - `Function Setting Holiday Away` -> `Holiday Away`
+  - `Function Setting Silent Mode` -> `Silent Mode`
+  - `Function Setting Silent Mode Level` -> `Silent Mode Level`
+  - `Function Setting Disinfect` -> `Disinfect`
+  - `Function Setting Holiday Home` -> `Holiday Home`
+  - `Function Setting ECO Mode` -> `ECO Mode`
+  - `Function Setting DHW Pumps Running Constant Temperature Water Recycling` -> `DHW Pumps Running Constant Temperature Water Recycling`
+- A slash in an entity name is not allowed: `Status BIT 1 Remote On/Off` is renamed to `Status BIT 1 Remote On-Off`
+- `Silent Mode Level` has changed from a boolean (on/off) to a select to make the current level more clear
+
+### Fixed
+
+- All modes: Fixed outlier filtering for `Coefficient of Performance`
+- Ferroli R290 models: Fixed outlier filtering for `number` sensors
+
+## [9.1.0] - 2025-12-31
+
+### Added
+
+- All models: Added "Oil return" to "Active State"
+  - Lubrication oil is present in compressor and in the refrigeration circuit. When "Oil return" is active, the heat pump returns the oil back from the refrigeration circuit to the compressor. This is a normal process to ensure the compressor stays lubricated. In a normal running system this can happen a few times per day.
+
+## [9.0.0] - 2025-11-23
+
+### Added
+
+- All models: Added Water Temperature Delta template sensor to calculate the difference between water inlet and outlet temperatures
+- R290 models: Added missing registers 190-199 and 280-288
+- Build system: Added multi-level inheritance support to model-generator.py - model files can now inherit from other models using `parent:` key, enabling easier creation of brand-specific variants (e.g., R290-ferroli.yaml can inherit from R290-generic.yaml)
+
+### Fixed
+
+- All models: Added outlier filtering to prevent impossible sensor values from corrupting graphs ([#113](https://github.com/Mosibi/Midea-heat-pump-ESPHome/issues/113))
+- All models: Fixed register 270 (t_T4 FRESH_C) to return correct cooling temperature value
+- R290 models: Added missing 0.01 scaling filter to cumulative energy registers 152-176 (values were 100x too large)
+- R290 models: Corrected emission type mappings in register 272 for all zones
+- R290 models: Removed registers 200, 250-254 (not present in R290 specification or cause modbus errors)
+- R290 models: Fixed naming and description of registers 179-186
+- R290 models: Fixed max values for register 265-268
+
+### Changed
+
+- All models: Renamed "Condensor Temperature T3" to "Condenser Temperature T3"
+
+## [8.0.0] - 2025-10-19
+
+### Changed
+
+- Binary sensor entities belonging to register 129 are updated so that the bit description are aligned to what most modbus tables. Where needed, the model specific files are updated to reflect their view on the modbus mappings.
+  - bit 0: id changed from `${devicename}_load_output_reserved` to `${devicename}_load_output_electric_heater_ibh2`
+  - bit 3: name changed from `Load Output Water Pump PUMP_I` to `Load Output Internal Circulation Pump PUMP_I`
+  - bit 5: name changed from `Load Output Reserved BIT 5` to `Load Output SV 2`
+  - bit 6: name changed from `Load Output External Water Pump P_o` to `Load Output External Circulation Pump PUMP_O`
+  - bit 7: name changed from `Load Output Water Return Water P_d` to `Load Output Water Return Water Pump PUMP_D`
+  - bit 8: name changed from `Load Output Mixed Water Pump P_c` to `Load Output Mixed Water Pump PUMP_C`
+  - bit 9: name changed from `Load Output SV 2` to `Load Output SV 3`
+  - bit 11: name changed from `Load Output Solar Water Pump` to `Load Output Solar Water Pump PUMP_S`
+
+*Register 129 bit 5 and bit 9 are not changed for R32 Airwell models.*
+
+## [7.4.1] - 2025-10-19
+
+### Fixed
+
+- Simplified the "Active State" logic. It now shows the state regardless of the fact that the remote controller or that the water flow is used to controll the heat pump. Fix for #104
+
+## [7.4.0] - 2025-10-12
+
+### Added
+
+- Active state now also reflects the 'Idle' state
+  - This new state is set when the heat pump's internal 'Operation Mode' is on(*), but it could not be mapped to a real state like 'Heating' or 'DHW'. This happens for example when the heat pump is preparing for a DHW run, or in between two heating runs.
+
+  `*:` The `Operation Mode` is not 'on', but something else. The logic uses 'is not OFF' to determine if the heat pump is on.
+
 ## [7.3.0] - 2025-10-06
 
 ### Changed

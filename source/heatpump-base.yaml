@@ -62,7 +62,7 @@ esphome:
   friendly_name: "${description}"
   project:
     name: "${devicename}.${description}"
-    version: 7.3.0
+    version: 10.0.0
 
 esp32:
   board: esp32dev
@@ -125,6 +125,38 @@ select:
       "Heat": 3
       "Cool": 2
       "Auto": 1
+  # Register: 5 -> Bit: 7
+  - platform: template
+    name: "Silent Mode Level"
+    id: "${devicename}_silent_mode_level"
+    icon: mdi:volume-medium
+    entity_category: config
+    options:
+      - "Level 1"
+      - "Level 2"
+    lambda: |-
+      if ((id(unmasked_value_register_5) & 0x80) == 0x80) {
+        return {"Level 2"};
+      } else {
+        return {"Level 1"};
+      }
+    set_action:
+      - lambda: |-
+          uint16_t checked_bit = 0x80;
+          uint16_t new_value = id(unmasked_value_register_5);  // originele unmasked waarde
+          if (x == "Level 2") {
+            new_value |= checked_bit;
+          } else {
+            new_value &= ~checked_bit;
+          }
+          if (new_value != id(unmasked_value_register_5)) {
+            // ESP_LOGD("unmasked_value_register_5", "Set silent_mode_level 0x%x -> 0x%x", id(unmasked_value_register_5), new_value);
+            id(unmasked_value_register_5) = new_value;
+            esphome::modbus_controller::ModbusCommandItem set_payload_command = esphome::modbus_controller::ModbusCommandItem::create_write_single_command(${devicename}, 5, new_value);
+            ${devicename}->queue_command(set_payload_command);
+          }
+          // Update the UI immediate insteafd of waiting for the next poll
+          id(${devicename}_silent_mode_level).publish_state(x);
   # Register: 269, default: 0
   - platform: modbus_controller
     modbus_controller_id: "${devicename}"
@@ -358,7 +390,9 @@ sensor:
       // Verify that electricity_consumption is <> 0 to avoid division by 0 error
       if (id(${devicename}_electricity_consumption).state != 0) {
         return id(${devicename}_power_output).state / id(${devicename}_electricity_consumption).state;
-      } else return {};
+      } else {
+        return NAN;
+      }
   # Register: 0 -> Config is present as select, but now we need get value from heatpump and save it as global var
   - platform: modbus_controller
     modbus_controller_id: "${devicename}"
@@ -479,8 +513,8 @@ sensor:
   # Register: 106
   - platform: modbus_controller
     modbus_controller_id: "${devicename}"
-    name: "Condensor Temperature T3"
-    id: "${devicename}_condensor_temperature_t3"
+    name: "Condenser Temperature T3"
+    id: "${devicename}_condenser_temperature_t3"
     icon: mdi:temperature-celsius
     register_type: holding
     address: 0x6a
@@ -1173,6 +1207,20 @@ sensor:
       int t1s_dhw = t5 + dt1s5;
       return t1s_dhw;
 
+  # Template sensor to get the water temperature delta (outlet-inlet)
+  - platform: template
+    name: "Water Temperature Delta"
+    id: "${devicename}_water_temperature_delta"
+    icon: mdi:thermometer
+    unit_of_measurement: "°C"
+    device_class: "temperature"
+    state_class: "measurement"
+    lambda: |-
+      int inlet = id(${devicename}_water_inlet_temperature).state;
+      int outlet = id(${devicename}_water_outlet_temperature).state;
+      int delta = outlet - inlet;
+      return delta;
+
   - platform: template
     name: "Active State Map"
     id: "${devicename}_active_state_map"
@@ -1184,7 +1232,9 @@ sensor:
         {"Heating", 1},
         {"Cooling", 2},
         {"DHW", 3},
-        {"Defrosting", 4}
+        {"Defrosting", 4},
+        {"Idle", 5},
+        {"Oil return", 6}
       };
 
       auto state_item = status_map.find(id(${devicename}_active_state).state);
@@ -1344,8 +1394,8 @@ binary_sensor:
   # Bit: 4 -> Is present in this config as a 'switch'
   # Bit: 5 -> is R/O but changed to template to avoid multiple modbus requests
   - platform: template
-    name: "Function Setting Holiday Away"
-    id: "${devicename}_function_setting_holiday_away"
+    name: "Holiday Away"
+    id: "${devicename}_holiday_away"
     icon: mdi:eye
     lambda: "return (id(unmasked_value_register_5) & 0x20) == 0x20; // Return status bit5"
   # Bit: 6 -> Is present in this config as a 'switch'
@@ -1414,7 +1464,7 @@ binary_sensor:
   # Bit: 4
   - platform: modbus_controller
     modbus_controller_id: "${devicename}"
-    name: "Status BIT 1 Remote On/Off"
+    name: "Status BIT 1 Remote On-Off"
     id: "${devicename}_status_bit_1_remote_on_off"
     icon: mdi:eye
     register_type: holding
@@ -1519,7 +1569,6 @@ binary_sensor:
     register_type: holding
     address: 0x80
     bitmask: 0x8000
-
   # Register: 129
   # Bit: 0
   - platform: modbus_controller
@@ -1534,7 +1583,7 @@ binary_sensor:
   - platform: modbus_controller
     modbus_controller_id: "${devicename}"
     name: "Load Output Electric Heater IBH 2"
-    id: "${devicename}_load_output_reserved"
+    id: "${devicename}_load_output_electric_heater_ibh2"
     icon: mdi:head-question-outline
     register_type: holding
     address: 0x81
@@ -1551,8 +1600,8 @@ binary_sensor:
   # Bit: 3
   - platform: modbus_controller
     modbus_controller_id: "${devicename}"
-    name: "Load Output Water Pump PUMP_I"
-    id: "${devicename}_load_output_water_pump_pump_i"
+    name: "Load Output Internal Circulation Pump PUMP_I"
+    id: "${devicename}_load_output_internal_circulation_pump_pump_i"
     icon: mdi:pump
     register_type: holding
     address: 0x81
@@ -1569,8 +1618,8 @@ binary_sensor:
   # Bit: 5
   - platform: modbus_controller
     modbus_controller_id: "${devicename}"
-    name: "Load Output Reserved BIT 5"
-    id: "${devicename}_load_output_reserved_bit_5"
+    name: "Load Output SV 2"
+    id: "${devicename}_load_output_sv2"
     icon: mdi:head-question-outline
     register_type: holding
     address: 0x81
@@ -1578,8 +1627,8 @@ binary_sensor:
   # Bit: 6
   - platform: modbus_controller
     modbus_controller_id: "${devicename}"
-    name: "Load Output External Water Pump P_o"
-    id: "${devicename}_load_output_external_water_pump_p_o"
+    name: "Load Output External Circulation Pump PUMP_O"
+    id: "${devicename}_load_output_external_circulation_pump_pump_o"
     icon: mdi:pump
     register_type: holding
     address: 0x81
@@ -1587,8 +1636,8 @@ binary_sensor:
   # Bit: 7
   - platform: modbus_controller
     modbus_controller_id: "${devicename}"
-    name: "Load Output Water Return Water P_d"
-    id: "${devicename}_load_output_water_return_water_p_d"
+    name: "Load Output Water Return Water Pump PUMP_D"
+    id: "${devicename}_load_output_water_return_water_pump_d"
     icon: mdi:pump
     register_type: holding
     address: 0x81
@@ -1596,8 +1645,8 @@ binary_sensor:
   # Bit: 8
   - platform: modbus_controller
     modbus_controller_id: "${devicename}"
-    name: "Load Output Mixed Water Pump P_c"
-    id: "${devicename}_load_output_mixed_water_pump_p_c"
+    name: "Load Output Mixed Water Pump PUMP_C"
+    id: "${devicename}_load_output_mixed_water_pump_pump_c"
     icon: mdi:pump
     register_type: holding
     address: 0x81
@@ -1605,8 +1654,8 @@ binary_sensor:
   # Bit: 9
   - platform: modbus_controller
     modbus_controller_id: "${devicename}"
-    name: "Load Output SV 2"
-    id: "${devicename}_load_output_sv2"
+    name: "Load Output SV 3"
+    id: "${devicename}_load_output_sv3"
     icon: mdi:eye
     register_type: holding
     address: 0x81
@@ -1623,8 +1672,8 @@ binary_sensor:
   # Bit: 11
   - platform: modbus_controller
     modbus_controller_id: "${devicename}"
-    name: "Load Output Solar Water Pump"
-    id: "${devicename}_load_output_solar_water_pump"
+    name: "Load Output Solar Water Pump PUMP_S"
+    id: "${devicename}_load_output_solar_water_pump_pump_s"
     icon: mdi:eye
     register_type: holding
     address: 0x81
@@ -1853,7 +1902,7 @@ binary_sensor:
     lambda: |-
       int fan_speed = id(${devicename}_fan_speed).state;
       int compressor_frequency = id(${devicename}_compressor_operating_frequency).state;
-      bool external_water_pump_on = id(${devicename}_load_output_external_water_pump_p_o).state;
+      bool external_water_pump_on = id(${devicename}_load_output_external_circulation_pump_pump_o).state;
 
       // If fan_speed is above 0, compressor_frequency is above 0 or external_water_pump_on is true,
       // then the outside unit of the heat pump system is running
@@ -2020,8 +2069,8 @@ switch:
           }
   # Register: 5 -> Bit: 4
   - platform: template
-    name: "Function Setting Disinfect"
-    id: "${devicename}_function_setting_disinfect"
+    name: "Disinfect"
+    id: "${devicename}_disinfect"
     icon: mdi:eye
     entity_category: config
     restore_mode: DISABLED
@@ -2055,9 +2104,9 @@ switch:
   # Register: 5 -> Bit: 5 Is present in this config as a 'binary_sensor'
   # Register: 5 -> Bit: 6
   - platform: template
-    name: "Function Setting Silent Mode"
-    id: "${devicename}_function_setting_silent_mode"
-    icon: mdi:eye
+    name: "Silent Mode"
+    id: "${devicename}_silent_mode"
+    icon: mdi:volume-low
     entity_category: config
     restore_mode: DISABLED
     optimistic: true
@@ -2085,42 +2134,11 @@ switch:
             esphome::modbus_controller::ModbusCommandItem set_payload_command = esphome::modbus_controller::ModbusCommandItem::create_write_single_command(${devicename}, 0x5, new_value);
             ${devicename}->queue_command(set_payload_command);
           }
-  # Register: 5 -> Bit: 7
-  - platform: template
-    name: "Function Setting Silent Mode Level"
-    id: "${devicename}_function_setting_silent_mode_level"
-    icon: mdi:eye
-    entity_category: config
-    restore_mode: DISABLED
-    optimistic: true
-    lambda: "return (id(unmasked_value_register_5) & 0x80) == 0x80;"
-    on_turn_on:
-      - lambda: |-
-          uint16_t checked_bit = 0x80;
-          uint16_t new_value = id(unmasked_value_register_5);  // The original unmasked value
-          new_value &= ~checked_bit;                           // Clear and set
-          new_value += checked_bit;
-          if ((new_value) != id(unmasked_value_register_5)) {
-            // ESP_LOGD("unmasked_value_register_5", "Set option to on f_s_silent_mode_level 0x%x -> 0x%x", id(unmasked_value_register_5), new_value);
-            id(unmasked_value_register_5) = new_value;
-            esphome::modbus_controller::ModbusCommandItem set_payload_command = esphome::modbus_controller::ModbusCommandItem::create_write_single_command(${devicename}, 5, new_value);
-            ${devicename}->queue_command(set_payload_command);
-          }
-    on_turn_off:
-      - lambda: |-
-          uint16_t checked_bit = 0x80;
-          uint16_t new_value = id(unmasked_value_register_5);  // The original unmasked value
-          new_value &= ~checked_bit;                           // Clear and set
-          if ((new_value) != id(unmasked_value_register_5)) {
-            // ESP_LOGD("unmasked_value_register_5", "Set option to off f_s_silent_mode_level 0x%x -> 0x%x", id(unmasked_value_register_5), new_value);
-            id(unmasked_value_register_5) = new_value;
-            esphome::modbus_controller::ModbusCommandItem set_payload_command = esphome::modbus_controller::ModbusCommandItem::create_write_single_command(${devicename}, 5, new_value);
-            ${devicename}->queue_command(set_payload_command);
-          }
+  # Register: 5 -> Bit: 7 is present in this config as 'select'
   # Register: 5 -> Bit: 8
   - platform: template
-    name: "Function Setting Holiday Home"
-    id: "${devicename}_function_setting_holiday_home"
+    name: "Holiday Home"
+    id: "${devicename}_holiday_home"
     icon: mdi:eye
     entity_category: config
     restore_mode: DISABLED
@@ -2152,8 +2170,8 @@ switch:
   # Register: 5 -> Bit: 9 Is present in this config as a 'binary_sensor'
   # Register: 5 -> Bit: 10
   - platform: template
-    name: "Function Setting ECO Mode"
-    id: "${devicename}_function_setting_eco_mode"
+    name: "ECO Mode"
+    id: "${devicename}_eco_mode"
     icon: mdi:eye
     entity_category: config
     restore_mode: DISABLED
@@ -2184,8 +2202,8 @@ switch:
           }
   # Register: 5 -> Bit: 11
   - platform: template
-    name: "Function Setting DHW Pumps Running Constant Temperature Water Recycling"
-    id: "${devicename}_function_setting_dhw_pumps_running_constant_temperature_water_recycling"
+    name: "DHW Pumps Running Constant Temperature Water Recycling"
+    id: "${devicename}_dhw_pumps_running_constant_temperature_water_recycling"
     icon: mdi:eye
     entity_category: config
     restore_mode: DISABLED
@@ -4197,7 +4215,7 @@ number:
       // Extracting the low byte (Heating) and storing it as a float
       value_floats[1] = (float)(value & 0x00FF) * 0.5;
 
-      return value_floats[1];
+      return value_floats[0];
     write_lambda: |-
       uint16_t value = id(unmasked_value_register_270); // The original unmasked value
       float input = x * 2.0;                            // Multiply x (the input from the slider) by 2
@@ -4243,24 +4261,24 @@ text_sensor:
     icon: mdi:power
     entity_category: "diagnostic"
     lambda: |-
-      if (id(${devicename}_load_output_run).state) {
-        // The heat pump is on
-        if (id(${devicename}_status_bit_1_defrosting).state) {
-          return {"Defrosting"};
-        } else if (id(${devicename}_load_output_sv1).state) {
-          return {"DHW"};
-        } else if (id(${devicename}_water_flow_temperature_control_zone_1).state || id(${devicename}_water_flow_temperature_control_zone_2).state) {
-          // The heat pump is on for heating or cooling
-          if (id(${devicename}_status_bit_1_heating_mode_set_by_room_thermostat).state || id(${devicename}_operational_mode).state == "Heat") {
-            return {"Heating"};
-          } else if (id(${devicename}_status_bit_1_cooling_mode_set_by_room_thermostat).state || id(${devicename}_operational_mode).state == "Cool") {
-            return {"Cooling"};
+      if (id(${devicename}_operating_mode).state != "OFF") {
+        if (id(${devicename}_load_output_run).state) {
+          // The heat pump is on
+          if (id(${devicename}_status_bit_1_defrosting).state) {
+            return {"Defrosting"};
+          } else if (id(${devicename}_status_bit_1_oil_return).state) {
+            return {"Oil return"};
+          } else if (id(${devicename}_load_output_sv1).state) {
+            return {"DHW"};
           } else {
-            // Return "Heating" if we cannot determine the correct state, for example when operational_mode is set to Auto
-            return {"Heating"};
+            // Return the state from "Operating Mode", which can be Cooling or Heating
+            return id(${devicename}_operating_mode).state;
           }
         } else {
-          return {"Unknown"};
+          // The heat pumps operating mode is on (not OFF), but is not "Heating", "Cooling", or "DHW".
+          // In this case the heat pump is Idle, which is for example the case when it is preparing for a DHW
+          // run or between "Heating" sessions
+          return {"Idle"};
         }
       } else {
         // The heat pump is off
